@@ -351,3 +351,4 @@ MigrationBackup/
 
 # Ionide (cross platform F# VS Code tools) working folder
 .ionide/
+/HPC_LowPassFiltter/Data/OutPut/outputRes0.png

@@ -7,7 +7,8 @@ using namespace std;
 
 void print(int* img, int row, int col);
 int* padding(int* img, int row, int col, int row_extended, int col_extended);
-int* slice_image(int* img, int row, int col, int* n_row_created, int des_col, int div_ratio,int rank, int size,int kernal_len);
+int* slice_image(int* img, int row, int col, int* n_row_created, int des_col, int div_ratio,int rank, int size,int kernel_len);
+int* Matrix_mul(int* img, int img_row, int img_col, int* kernel, int kernal_len, int kernel_sum);
 
 int main(int args,char** argv)
 {
@@ -24,20 +25,26 @@ int main(int args,char** argv)
 	//int* rows = new int[7];
 	//int* col = new int[7];
 
-	const int kernal_len = 3;
-	int matrix[kernal_len][kernal_len] = {
-		{1,1,1},
-		{1,1,1},
-		{1,1,1}
+	const int kernel_len = 3;
+	int matrix[kernel_len*kernel_len] = {
+		1,1,1,
+		1,1,1,
+		1,1,1
 	};
 
 
 	// global variable
 	int div_ratio =0;
+	int sum_kernel = 0;
+
+	for (int i = 0; i < kernel_len*kernel_len; i++)
+	{
+		sum_kernel += matrix[i];
+	}
 
 	//int* sub_image = new int{};
-	int* sub_image;
-	int sub_img_r = 0;
+	//int* sub_image;
+	//int sub_img_r = 0;
 
 
 	//  Master Variable
@@ -55,8 +62,8 @@ int main(int args,char** argv)
 
 	if (rank == 0)
 	{
-		row_extend = row + kernal_len - 1;
-		col_extend = col + kernal_len - 1;
+		row_extend = row + kernel_len - 1;
+		col_extend = col + kernel_len - 1;
 		int* pading_image = padding(image,row,col,row_extend,col_extend);
 
 
@@ -77,37 +84,43 @@ int main(int args,char** argv)
 		//row_created = sizeof(splited_image) / (sizeof(int)* col);
 		
 		int row_created_master;
-		int* _image_master = slice_image(pading_image, row_extend, col_extend, &row_created_master, col_extend, div_ratio,0, size, kernal_len);
+		int* _image_master = slice_image(pading_image, row_extend, col_extend, &row_created_master, col_extend, div_ratio,0, size, kernel_len);
 
-		sub_img_r = row_created_master;
-		sub_image = _image_master;
+		print(_image_master,row_created_master,col_extend);
 
-		free(_image_master);
+		//sub_img_r = row_created_master;
+		//sub_image = _image_master;
+
+		int* matrix_mul = Matrix_mul(_image_master,row_created_master,col_extend,matrix,kernel_len,sum_kernel);
+
+		print(matrix_mul, row_created_master - (kernel_len - 1), col_extend - (kernel_len - 1));
+
+		//free(_image_master);
 
 
-		for (int _rank = 1; _rank < size; _rank++)
-		{
-			int row_created;
-			int*_image = slice_image(pading_image, row_extend, col_extend, &row_created, col_extend, div_ratio, _rank, size, kernal_len);
-			//print(_image, row_created, col_extend);
+		//for (int _rank = 1; _rank < size; _rank++)
+		//{
+		//	int row_created;
+		//	int*_image = slice_image(pading_image, row_extend, col_extend, &row_created, col_extend, div_ratio, _rank, size, kernel_len);
+		//	//print(_image, row_created, col_extend);
 
-			cout << "send start    "<<_rank << endl;
+		//	cout << "send start    "<<_rank << endl;
 
-			MPI_Send(&row_created,1,MPI_INT,_rank,0,mcw);
-			MPI_Send(&_image[0],row_created*col_extend,MPI_INT,_rank,1,mcw);
+		//	MPI_Send(&row_created,1,MPI_INT,_rank,0,mcw);
+		//	MPI_Send(&_image[0],row_created*col_extend,MPI_INT,_rank,1,mcw);
 
-			cout << "send End     "<<_rank << endl;
-			free(_image);
-		}
+		//	cout << "send End     "<<_rank << endl;
+		//	free(_image);
+		//}
 
-		free(pading_image);
+		//free(pading_image);
 	}
 	// global variable
 	MPI_Bcast(&div_ratio, 1, MPI_INT, Master, mcw);
 	MPI_Bcast(&row_extend, 1, MPI_INT, Master, mcw);
 	MPI_Bcast(&col_extend, 1, MPI_INT, Master, mcw);
 	
-	if (rank != 0)
+	/*if (rank != 0)
 	{
 		cout << "recive start    "<<rank << endl;
 		
@@ -122,7 +135,7 @@ int main(int args,char** argv)
 		print(sub_image, sub_img_r, col_extend);
 	
 		cout << "recive End    " << rank << endl;
-	}
+	}*/
 	
 
 	
@@ -132,6 +145,8 @@ int main(int args,char** argv)
 
 void print(int* img , int row , int col)
 {
+	if (img == NULL) return;
+
 	cout << "row = " << row << "  col = " << col << endl;
 	for (int i = 0; i < row; i++)
 	{
@@ -203,17 +218,19 @@ int* padding(int* img, int row, int col, int row_extended, int col_extended)
 	}
 	return pading_image;
 }
-int* slice_image(int* img, int row, int col,int* n_row_created, int des_col,int div_ratio,int rank,int size,int kernal_len)
+int* slice_image(int* img, int row, int col,int* n_row_created, int des_col,int div_ratio,int rank,int size,int kernel_len)
 {
+	if (rank + 1 > size) return NULL;
+
 	int start = (rank * div_ratio) + 1;
 	int end = ((rank + 1) * div_ratio) - 1 + 1;
 
 	if (rank == size - 1) // last thread takes the rest
 	{
-		end = row- (kernal_len - 1); // index of last row
+		end = row- (kernel_len - 1); // index of last row
 	}
 
-	int des_row = (end - start + 1) + (kernal_len - 1);
+	int des_row = (end - start + 1) + (kernel_len - 1);
 
 	int* sub_image = new int[(des_row) * (des_col)]; // create the sub image matrix
 
@@ -246,4 +263,41 @@ int* slice_image(int* img, int row, int col,int* n_row_created, int des_col,int 
 		}
 	}
 	return sub_image;
+}
+int* Matrix_mul(int* img, int img_row, int img_col, int* kernel, int kernel_len,int kernel_sum)
+{
+	int* _img = new int[(img_row - (kernel_len - 1)) * (img_col - (kernel_len - 1))];
+	int ptr_prev_r , ptr_prev_c;
+	int sum = 0,sum_median=0;
+
+	// loop on the main image start from the actual data discarding the padding rows & cols
+	for (int i = kernel_len -2; i < img_row - 1; i++)
+	{
+		for (int j = kernel_len - 2; j < img_col - 1; j++)
+		{
+			// get the offset to calculate
+			ptr_prev_r = i - (kernel_len - 2); //start from (center index - kernel row) of the img padding 
+			ptr_prev_c = j - (kernel_len - 2); //start from (center index - kernel col) of the img padding
+
+			// loop to size of the kernal (apply the kernal from the center)
+			for (int i_k = 0; i_k < kernel_len; i_k++)
+			{
+				for (int j_k = 0; j_k < kernel_len; j_k++)
+				{
+					//cout << "  img :" << img[((ptr_prev_r + i_k) * img_col) + ptr_prev_c + j_k];
+					sum += img[((ptr_prev_r + i_k)* img_col) + ptr_prev_c + j_k] * kernel[(i_k * kernel_len) + j_k];
+				}
+				//cout << endl;
+			}
+
+
+			sum_median = ((sum / kernel_sum) % 2 < 0.5) ? (sum / kernel_sum) : ((sum / kernel_sum) + 1);  // get the median of the multiplication result (result / kernel sum);
+			_img[((i - (kernel_len - 2)) * (img_col - (kernel_len - 1))) + (j - (kernel_len - 2))] = sum_median;  // fill the result in the temp array
+
+
+			sum = 0; // clear the prev sum & median
+			sum_median = 0;
+		}
+	}
+	return _img;
 }
