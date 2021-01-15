@@ -5,32 +5,54 @@ using namespace std;
 
 #define mcw MPI_COMM_WORLD
 
-void print(int* img, int row, int col, int size_col);
-int* padding(int* img, int row, int col, int row_extended, int col_extended);
-int* slice_image_test(int* img, int row, int col, int* n_row_created, int des_col, int div_ratio,int rank, int size,int kernel_len);
-void slice_image(int row, int col, int* n_row_created, int* start_row_index, int div_ratio, int rank, int size, int kernel_len);
-int* Matrix_mul(int* img, int img_row, int img_col, int* kernel, int kernal_len, int kernel_sum);
+void print(int* img, int start_i, int start_j, int end_row, int end_col, int size_col);
+void print(float* img, int start_i, int start_j, int end_row, int end_col, int size_col);
+int* padding_2row_2col(int* img, int row, int col);
+int* border_replication(int* img, int row, int col, int kernel_len);
+int* portion_image(int* img, int row, int col, int* n_row_created, int div_ratio, int rank, int size, int kernel_len);
+void specify_index(int row, int* n_row_created, int* start_row_index, int div_ratio, int rank, int size, int kernel_len);
+int* Matrix_mul(int* img, int img_row, int img_col, int* kernel, int kernal_len, int kernel_sum);  // kernel is integer
+//int* Matrix_mul(int* img, int img_row, int img_col, float* kernel, int kernal_len, float kernel_sum);  // kernel is float
+int portion_ratio(int num_row, int size);
 
 int main(int args,char** argv)
 {
 	 // constant
-	const int row = 7, col = 7;
+	//const int row = 7, col = 7;
+	//int image[row * col] = {  // row col
+	//1,4,2,3,9,5,4, //0
+	//2,6,3,2,8,8,3, //1
+	//1,4,8,9,3,5,4, //2
+	//3,3,5,2,8,1,7, //3
+	//5,5,5,7,6,6,5,
+	//7,4,9,5,4,5,7,
+	//1,7,1,3,1,5,2};
+
+	const int row = 4, col = 5;
 	int image[row * col] = {  // row col
-	1,4,2,3,9,5,4, //0
-	2,6,3,2,8,8,3, //1
-	1,4,8,9,3,5,4, //2
-	3,3,5,2,8,1,7, //3
-	5,5,5,7,6,6,5,
-	7,4,9,5,4,5,7,
-	1,7,1,3,1,5,2};
+	1,4,2,3,9, //0
+	2,6,3,2,3, //1
+	2,6,3,2,3, //1
+	2,6,3,2,3 //1
+	};
+
+
 	//int* rows = new int[7];
 	//int* col = new int[7];
 
-	const int kernel_len = 3;
+	/*const int kernel_len = 3;
 	int matrix[kernel_len*kernel_len] = {
 		1,1,1,
 		1,1,1,
 		1,1,1
+	};*/
+	const int kernel_len = 5;
+	int matrix[kernel_len * kernel_len] = {
+		1,1,1,1,1,
+		1,1,1,1,1,
+		1,1,1,1,1,
+		1,1,1,1,1,
+		1,1,1,1,1
 	};
 
 
@@ -70,17 +92,18 @@ int main(int args,char** argv)
 	{
 		
 
-		print(image, row, col,col);
+		print(image,0,0, row, col,col);
 
-		//cout << "size" << size << endl;
+		cout << "sum" << sum_kernel << endl;
 		row_extend = row + (kernel_len - 1);
 		col_extend = col + (kernel_len - 1);
-		int* pading_image = padding(image,row,col,row_extend,col_extend);
+		int* pading_image = border_replication(image,row,col,kernel_len);
 
 
-		print(pading_image, row_extend, col_extend,col_extend);
+		print(pading_image,0,0, row_extend, col_extend,col_extend);
 
 
+		cout << "size:   " << size << endl;
 		// divition ratio calcution
 		float row_calc_div_f  = (float)row / (float)size;
 
@@ -90,7 +113,6 @@ int main(int args,char** argv)
 		}
 		div_ratio = (int)row_calc_div_f;
 		cout << "div_ratio    " << div_ratio << "    mod:    " << fmod(row_calc_div_f, 1) << endl;
-
 
 		/*cout<<"row_calc_div    "<< row_calc_div_f << "    mod:    " << (row_calc_div_f % 1) << endl;
 		if ((row_calc_div_f % 1) >= 0.5)
@@ -115,9 +137,9 @@ int main(int args,char** argv)
 
 			int start_row_index = 0;
 			int row_created =0;
-			slice_image(row_extend, col_extend, &row_created, &start_row_index, div_ratio, _rank, size, kernel_len);
+			specify_index(row, &row_created, &start_row_index, div_ratio, _rank, size, kernel_len);
 			
-			//cout << "rank:  " << _rank << "  start:    " << start_index << "    row_created:" << row_created << endl;
+			cout << "rank:  " << _rank << "  start:    " << start_row_index << "    row_created:" << row_created << endl;
 
 			if (_rank == Master) {
 				
@@ -139,7 +161,7 @@ int main(int args,char** argv)
 
 
 
-				cout << "rank_send:   " << _rank << "  data:   " << pading_image[start_row_index * col_extend] << endl;
+				//cout << "rank_send:   " << _rank << "  data:   " << pading_image[start_row_index * col_extend] << endl;
 		}
 		
 
@@ -161,6 +183,9 @@ int main(int args,char** argv)
 
 
 		free(pading_image);
+
+		cout << "sub_image_r   " << sub_img_r << endl;
+
 	}
 	// global variable
 	// broad cast row & col
@@ -176,14 +201,16 @@ int main(int args,char** argv)
 		sub_image = new int[ sub_img_r * col_extend ];
 		MPI_Recv(&sub_image[0],sub_img_r*col_extend,MPI_INT,Master,1,mcw,&stats);
 
-		cout << "rank_recv:   " << rank << "  data:   " << sub_image[0] << endl;
+		
 	}
 	
 	
 
 	matrix_mul = Matrix_mul(sub_image, sub_img_r, col_extend, matrix, kernel_len, sum_kernel);
 
-	//free(sub_image);
+	//print(matrix_mul, 0, 0, (sub_img_r - (kernel_len - 1)), (col_extend - (kernel_len - 1)), (col_extend - (kernel_len - 1)));
+
+	free(sub_image);
 
 
 	if (rank != Master) {
@@ -226,7 +253,7 @@ int main(int args,char** argv)
 				start_row_index += row_rank;
 			
 
-				free(matrix_mul);
+				//free(matrix_mul);
 				//delete[]result;
 				//free(result);
 
@@ -249,7 +276,7 @@ int main(int args,char** argv)
 			//free(result);
 			//MPI_Free_mem(result);
 		}
-		print(filtered_img, row, col,col);
+		print(filtered_img ,0,0, row, col,col);
 
 		delete []filtered_img;
 	}
@@ -257,24 +284,74 @@ int main(int args,char** argv)
 	MPI_Finalize();
 }
 
-void print(int* img , int row , int col, int size_col)
+
+
+
+// Function Declaretion
+void print(int* img, int start_i, int start_j, int end_row, int end_col, int size_col)
 {
 	if (img == NULL) return;
 
-	cout << "row = " << row << "  col = " << col << endl;
-	for (int i = 0; i < row; i++)
+	cout << "rows = " << end_row << "  columns = " << end_col << endl;
+	for (int i = start_i; i < end_row; i++)
 	{
-		for (int j = 0; j < col; j++)
+		for (int j = start_j; j < end_col; j++)
 		{
 			// 2d to 1d array index[(i*col) + j]
-			cout << img[(i*size_col )+ j] << "\t";
+			cout << img[(i * size_col) + j] << "\t";
 		}
 		cout << endl;
 	}
 }
-int* padding(int* img, int row, int col, int row_extended, int col_extended)
+void print(float* img, int start_i, int start_j, int end_row, int end_col, int size_col)
 {
-	int* pading_image = new int[ row_extended * col_extended ];
+	if (img == NULL) return;
+
+	cout << "rows = " << end_row << "  columns = " << end_col << endl;
+	for (int i = start_i; i < end_row; i++)
+	{
+		for (int j = start_j; j < end_col; j++)
+		{
+			// 2d to 1d array index[(i*col) + j]
+			cout << img[(i * size_col) + j] << "\t";
+		}
+		cout << endl;
+	}
+}
+
+int portion_ratio(int num_row, int size)
+{
+	int temp = 0;
+	// divition ratio calcution
+	float row_calc_div_f = (float)num_row / (float)size;
+	if (fmod(row_calc_div_f, 1) >= 0.5)  // fmod return (num of row that make fraction with the divition) 
+	{
+		row_calc_div_f += 1;
+	}
+	temp = (int)row_calc_div_f;
+	cout << "division_ratio for each node  = " << temp << "  row" << endl;
+
+	return temp;
+}
+
+int* border_replication(int* img, int row, int col, int kernel_len)
+{
+	int* temp = img;
+	int row_extended = row, col_extended = col;
+	for (int i = 0; i < (kernel_len - 1) / 2; i++)
+	{
+		temp = padding_2row_2col(temp, row_extended, col_extended);
+		row_extended += 2;
+		col_extended += 2;
+	}
+	return temp;
+}
+
+int* padding_2row_2col(int* img, int row, int col)
+{
+	int row_extended = row + 2, col_extended = col + 2;
+
+	int* pading_image = new int[row_extended * col_extended];
 
 	for (int i = 0; i < row_extended; i++)
 	{
@@ -296,17 +373,17 @@ int* padding(int* img, int row, int col, int row_extended, int col_extended)
 				}
 				continue;
 			}
-			if (i == row_extended-1) // repeate last row
+			if (i == row_extended - 1) // repeate last row
 			{
-				
+
 				if (j == 0) //set corner
 				{
 					pading_image[(i * col_extended) + j] = img[((i - 2) * col) + j];
-					
+
 				}
 				else if (j == col_extended - 1) // set  corner
 				{
-					pading_image[(i * col_extended) + j] = img[((i - 2 )* col) + j - 2];
+					pading_image[(i * col_extended) + j] = img[((i - 2) * col) + j - 2];
 				}
 				else // the rest of the cells
 				{
@@ -314,9 +391,9 @@ int* padding(int* img, int row, int col, int row_extended, int col_extended)
 				}
 				continue;
 			}
-			if ((j == 0 || j == col_extended - 1)&& i > 0 ) // repeate the first and last col
+			if ((j == 0 || j == col_extended - 1) && i > 0) // repeate the first and last col
 			{
-				if (j==0) // set the first col
+				if (j == 0) // set the first col
 				{
 					pading_image[(i * col_extended) + j] = img[((i - 1) * col) + j];
 				}
@@ -326,72 +403,112 @@ int* padding(int* img, int row, int col, int row_extended, int col_extended)
 				}
 				continue;
 			}
-			pading_image[(i * col_extended) + j] = img[((i - 1 )* col) + j - 1];  // the middle cells
+			pading_image[(i * col_extended) + j] = img[((i - 1) * col) + j - 1];  // the middle cells
 			//pading_image[(i * col_extended) + j] = 0;
-		}	
+		}
 	}
 	return pading_image;
 }
-int* slice_image_test(int* img, int row, int col,int* n_row_created, int des_col,int div_ratio,int rank,int size,int kernel_len)
-{
-	if (rank + 1 > size) return NULL;
 
-	int start = (rank * div_ratio) + (kernel_len - 2); // shift down by the nu of row added by padding
-	int end = ((rank + 1) * div_ratio) - 1 + (kernel_len - 2);
+void specify_index(int row, int* n_row_created, int* start_row_index, int div_ratio, int rank, int size, int kernel_len)
+{
+	if (rank + 1 > size) return;
+
+	int padded_row_per_side = ((kernel_len - 1) / 2);
+	int start = (rank * div_ratio) ;
+	int end = ((rank + 1) * div_ratio) - 1 ;
 
 	if (rank == size - 1) // last thread takes the rest
 	{
-		end = row- (kernel_len - 1); // index of last row
+		end = row - 1 ; // index of last row (size of array - size of padding rows)
 	}
 
 	int des_row = (end - start + 1) + (kernel_len - 1);
 
-	int* sub_image = new int[(des_row) * (des_col)]; // create the sub image matrix
 
 	*n_row_created = des_row; // return the number of created rows
 	//n_row_created = &des_row;
 
+	//*start_row_index = start - padded_row_per_side; // return the starting index in the padded array
+	*start_row_index = start ; // return the starting index in the padded array
+}
 
-	for (int i = start - ((kernel_len - 1) / 2); i < start ; i++) // take the previouse row
+int* portion_image(int* img, int row, int col, int* n_row_created, int div_ratio, int rank, int size, int kernel_len)
+{
+	int start_index = 0, nu_row_created = 0;
+
+	specify_index(row, &nu_row_created, &start_index, div_ratio, rank, size, kernel_len);
+
+	int* sub_image = new int[nu_row_created * col];
+
+	for (int i = 0; i < nu_row_created; i++)
 	{
-		for (int j = 0; j < des_col; j++)
+		for (int j = 0; j < col; j++)
 		{
-			// sub_image[0] = img
-			sub_image[((i - (start - ((kernel_len - 1) / 2))) * des_col) + j] = img[(i * col) + j];
+			sub_image[(i * col) + j] = img[start_index];
+
+			start_index++;
 		}
 	}
-	for (int i = start; i <= end; i++) // the actule cells and the extended col
-	{
-		for (int j = 0; j < des_col; j++)
-		{
-			// index of sub_img is 1 ahead
-			sub_image[((i - start + ((kernel_len - 1) / 2)) * des_col) + j] = img[(i * col) + j];
-		}
-	}
-	for (int i = end + ((kernel_len - 1) / 2); i < end + (((kernel_len - 1) / 2)*2) ; i++) // take the future row
-	{
-		for (int j = 0; j < des_col; j++)
-		{
-			// sub_image[des_row + 1] = img[end +1]
-			sub_image[((i - (end + ((kernel_len - 1) / 2))+(des_row - 1)) * des_col) + j] = img[(i * col) + j];
-		}
-	}
+
+	*n_row_created = nu_row_created;
+
 	return sub_image;
 }
-int* Matrix_mul(int* img, int img_row, int img_col, int* kernel, int kernel_len,int kernel_sum)
+
+//int* Matrix_mul(int* img, int img_row, int img_col, int* kernel, int kernel_len,int kernel_sum)
+//{
+//	int* _img = new int[(img_row - (kernel_len - 1)) * (img_col - (kernel_len - 1))];
+//	int ptr_prev_r , ptr_prev_c;
+//	int sum = 0,sum_median=0;
+//
+//	// loop on the main image start from the actual data discarding the padding rows & cols
+//	for (int i = kernel_len -2; i < img_row - 1; i++)
+//	{
+//		for (int j = kernel_len - 2; j < img_col - 1; j++)
+//		{
+//			// get the offset to calculate
+//			ptr_prev_r = i - (kernel_len - 2); //start from (center index - kernel row) of the img padding 
+//			ptr_prev_c = j - (kernel_len - 2); //start from (center index - kernel col) of the img padding
+//
+//			// loop to size of the kernal (apply the kernal from the center)
+//			for (int i_k = 0; i_k < kernel_len; i_k++)
+//			{
+//				for (int j_k = 0; j_k < kernel_len; j_k++)
+//				{
+//					//cout << "  img :" << img[((ptr_prev_r + i_k) * img_col) + ptr_prev_c + j_k];
+//					sum += img[((ptr_prev_r + i_k)* img_col) + ptr_prev_c + j_k] * kernel[(i_k * kernel_len) + j_k];
+//				}
+//				//cout << endl;
+//			}
+//
+//			float t = (float)sum / (float)kernel_sum;
+//			sum_median = ((fmod(t,1) <= 0.5) ? (int)t : (int)t + 1);  // get the median of the multiplication result (result / kernel sum);
+//			_img[((i - (kernel_len - 2)) * (img_col - (kernel_len - 1))) + (j - (kernel_len - 2))] = sum_median;  // fill the result in the temp array
+//
+//
+//			sum = 0; // clear the prev sum & median
+//			sum_median = 0;
+//		}
+//	}
+//	return _img;
+//}
+
+int* Matrix_mul(int* img, int img_row, int img_col, int* kernel, int kernel_len,int kernel_sum) // kernel is integer
 {
 	int* _img = new int[(img_row - (kernel_len - 1)) * (img_col - (kernel_len - 1))];
-	int ptr_prev_r , ptr_prev_c;
-	int sum = 0,sum_median=0;
+	int ptr_prev_r, ptr_prev_c;
+	int sum = 0, sum_median = 0;
+	int padded_row_per_side = ((kernel_len - 1) / 2);
 
 	// loop on the main image start from the actual data discarding the padding rows & cols
-	for (int i = kernel_len -2; i < img_row - 1; i++)
+	for (int i = padded_row_per_side; i < img_row - padded_row_per_side; i++)
 	{
-		for (int j = kernel_len - 2; j < img_col - 1; j++)
+		for (int j = padded_row_per_side; j < img_col - padded_row_per_side; j++)
 		{
 			// get the offset to calculate
-			ptr_prev_r = i - (kernel_len - 2); //start from (center index - kernel row) of the img padding 
-			ptr_prev_c = j - (kernel_len - 2); //start from (center index - kernel col) of the img padding
+			ptr_prev_r = i - (padded_row_per_side); //start from (center index - kernel row) of the img padding 
+			ptr_prev_c = j - (padded_row_per_side); //start from (center index - kernel col) of the img padding
 
 			// loop to size of the kernal (apply the kernal from the center)
 			for (int i_k = 0; i_k < kernel_len; i_k++)
@@ -399,14 +516,14 @@ int* Matrix_mul(int* img, int img_row, int img_col, int* kernel, int kernel_len,
 				for (int j_k = 0; j_k < kernel_len; j_k++)
 				{
 					//cout << "  img :" << img[((ptr_prev_r + i_k) * img_col) + ptr_prev_c + j_k];
-					sum += img[((ptr_prev_r + i_k)* img_col) + ptr_prev_c + j_k] * kernel[(i_k * kernel_len) + j_k];
+					sum += img[((ptr_prev_r + i_k) * img_col) + ptr_prev_c + j_k] * kernel[(i_k * kernel_len) + j_k];
 				}
 				//cout << endl;
 			}
 
 			float t = (float)sum / (float)kernel_sum;
-			sum_median = ((fmod(t,1) <= 0.5) ? (int)t : (int)t + 1);  // get the median of the multiplication result (result / kernel sum);
-			_img[((i - (kernel_len - 2)) * (img_col - (kernel_len - 1))) + (j - (kernel_len - 2))] = sum_median;  // fill the result in the temp array
+			sum_median = ((fmod(t, 1) < 0.5) ? (int)t : (int)t + 1);  // get the median of the multiplication result (result / kernel sum);
+			_img[((i - (padded_row_per_side)) * (img_col - (kernel_len - 1))) + (j - (padded_row_per_side))] = sum_median;  // fill the result in the temp result array
 
 
 			sum = 0; // clear the prev sum & median
@@ -416,24 +533,3 @@ int* Matrix_mul(int* img, int img_row, int img_col, int* kernel, int kernel_len,
 	return _img;
 }
 
-void slice_image(int row, int col, int* n_row_created,int* start_row_index , int div_ratio, int rank, int size, int kernel_len)
-{
-	if (rank + 1 > size) return;
-
-	int padded_row_per_side = ((kernel_len - 1) / 2);
-	int start = (rank * div_ratio) + padded_row_per_side;
-	int end = ((rank + 1) * div_ratio) - 1 + padded_row_per_side;
-
-	if (rank == size - 1) // last thread takes the rest
-	{
-		end = row - (kernel_len - 1); // index of last row (size of array - size of padding rows)
-	}
-
-	int des_row = (end - start + 1) + (kernel_len - 1);
-
-
-	*n_row_created = des_row; // return the number of created rows
-	//n_row_created = &des_row;
-
-	*start_row_index = start - padded_row_per_side; // return the starting index in the actual array
-}
