@@ -393,7 +393,7 @@ int main(int args, char** argv)
 			int n = 0;
 			cin >> n;
 		createImage(filtered_img, row, col, n);*/
-			createImage(filtered_img, row, col, 0);
+			createImage(filtered_img, row, col, kernel_len);
 
 			stop_s = clock(); // stop the time of the program
 
