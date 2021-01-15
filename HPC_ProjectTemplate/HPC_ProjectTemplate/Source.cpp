@@ -20,7 +20,8 @@ void print(int* img, int start_i, int start_j, int end_row, int end_col, int siz
 int* padding(int* img, int row, int col, int row_extended, int col_extended);
 int* portion_image(int*img, int row, int col, int* n_row_created, int div_ratio, int rank, int size, int kernel_len);
 void specify_index(int row, int* n_row_created, int* start_row_index, int div_ratio, int rank, int size, int kernel_len);
-int* Matrix_mul(int* img, int img_row, int img_col, int* kernel, int kernal_len, int kernel_sum);
+int* Matrix_mul(int* img, int img_row, int img_col, int* kernel, int kernal_len, int kernel_sum);  // kernel is integer
+//int* Matrix_mul(int* img, int img_row, int img_col, float* kernel, int kernal_len,float kernel_sum);  // kernel is float
 int portion_ratio(int num_row, int size);
 
 
@@ -95,22 +96,24 @@ int main(int args, char** argv)
 
 	// constant
 	const int kernel_len = 3;
-	int matrix[kernel_len * kernel_len] = {
-		1,2,1,
-		2,0,2,
-		1,2,1
+	int kernel[kernel_len * kernel_len] = {
+		1,0,1,
+		0,2,0,
+		1,0,1
 	};
+	//float kernel[kernel_len * kernel_len] = {
+	//0.1f,0.1f,0.1f,
+	//0.1f,0.1f,0.1f,
+	//0.1f,0.1f,0.1f
+	//};
 
 	// global variable
-	int div_ratio = 0;
-	int row_extend = 0;
 	int col_extend = 0;
-
 	int sum_kernel = 0;
-
+	//float sum_kernel = 0;
 	for (int i = 0; i < kernel_len * kernel_len; i++)
 	{
-		sum_kernel += matrix[i];
+		sum_kernel += kernel[i];
 	}
 
 
@@ -123,8 +126,10 @@ int main(int args, char** argv)
 	//  Master Variable
 	const int Master = 0;
 	int row = 0, col = 0; // row , col of the original image
-	int* filtered_img;  // the final img
-	int start_s = 0, stop_s = 0, TotalTime = 0;
+	int* filtered_img = new int{};  // the final img
+	int start_s = 0, stop_s = 0, TotalTime = 0,start_k=0 , time_of_aplly_kerel=0;
+	int div_ratio = 0;
+	int row_extend = 0;
 
 #pragma endregion
 
@@ -137,53 +142,63 @@ int main(int args, char** argv)
 	int size = 0;
 	MPI_Comm_size(MPI_COMM_WORLD, &size);
 
-	//cout << "size:    " << size << "   Rank:   " << rank << endl;
-	
+	// get the image and splited and send to each node
 	if (rank == Master)
 	{
 		int ImageWidth = 0, ImageHeight = 0;
-		
+		start_s = clock(); // start the time of the program
+
 		// get the image
 		System::String^ imagePath;
 		std::string img;
 		img = "..//Data//Input//test.png";
 		imagePath = marshal_as<System::String^>(img);
 
+		cout << "Image Name : " <<" test.png "<< endl;
+
+		cout << "number of nodes = " << size << endl;
+
 		int* imageData = inputImage(&ImageWidth, &ImageHeight, imagePath);
+
+		// determine which is the col ,row
 
 		row = ImageWidth;
 		col = ImageHeight;
 
-		/*row = ImageHeight;
-		col = ImageWidth;*/
-
-		//print(imageData,0,0, 3, 10, col);
+		//row = ImageHeight;
+		//col = ImageWidth;
 		
 
 
-		row_extend = row + (kernel_len - 1); // add the num of row to add on the original array
-		col_extend = col + (kernel_len - 1);
+		row_extend = row + (kernel_len - 1); // add the num of row to padding the original array
+		col_extend = col + (kernel_len - 1); // add the num of col to padding the original array
+
+
+			start_k = clock();  // start the timer of aplly the kerel
 
 		// padding the image
-			start_s = clock();  // start the timer
 		int* pading_image = padding(imageData, row, col, row_extend, col_extend);
 
 
 		// divition ratio calcution
-				// calculate the ratio of dividing the matrix on every thread equly
+				// calculate the ratio of dividing (rows) of the matrix on every thread equly
 		div_ratio = portion_ratio(row,size);
 
 		
-		//// split the matrix across the clients
+#pragma region spliting & sending the data   // split the (padded)image across the clients
+
+
+
+	 // send the data by refrence the index of the padded image
 			MPI_Request request;
 		for (int _rank = 0; _rank < size; _rank++)
 		{
 
 			int start_row_index = 0;
 			int row_created = 0;
-			specify_index(row_extend, &row_created, &start_row_index, div_ratio, _rank, size, kernel_len);
+			specify_index(row_extend, &row_created, &start_row_index, div_ratio, _rank, size, kernel_len); // get the starting index of each thread and the num of row it gets
 
-			cout << "rank:  " << _rank << "  start:    " << start_row_index << "    row_created:" << row_created << endl;
+			//cout << "rank:  " << _rank << "  start:    " << start_row_index << "    row_created:" << row_created << endl;
 
 			if (_rank == Master) {
 
@@ -200,23 +215,29 @@ int main(int args, char** argv)
 				continue;
 			}
 
-			MPI_Send(&row_created, 1, MPI_INT, _rank, Master, mcw);
-			cout << "rank_send:   " << _rank << "  data:   " << pading_image[((start_row_index + row_created)* col_extend)-1] << endl;
-			//MPI_Send(&pading_image[(start_row_index * col_extend)], row_created * col_extend, MPI_INT, _rank,(Master + 1), mcw);
-			
-			
-			MPI_Isend(&pading_image[(start_row_index * col_extend)], row_created * col_extend, MPI_INT, _rank, (Master + 1), mcw,&request); // do not wait for send complete how ever use recv to wait for data correction
-		
+				MPI_Send(&row_created, 1, MPI_INT, _rank, Master, mcw); // send the num of that each thread took
+				
+				// send the data
+
+				//MPI_Send(&pading_image[(start_row_index * col_extend)], row_created * col_extend, MPI_INT, _rank,(Master + 1), mcw);
+
+
+				// do not wait for send complete how ever use recv to wait for data accurecy and ensures the correction
+				MPI_Isend(&pading_image[(start_row_index * col_extend)], row_created * col_extend, MPI_INT, _rank, (Master + 1), mcw, &request);
 		}
+		
 
 
-		/*for (int _rank = 0; _rank < size; _rank++)
+
+   // send the data by slpit the padded image into sub image (arrays)
+		
+		/*MPI_Request request;
+		for (int _rank = 0; _rank < size; _rank++)
 		{
 			int start_index = 0;
 			int row_created = 0;
 
-			int* _image = new int[1];
-			 _image= portion_image(pading_image,row_extend,col_extend,&row_created,div_ratio,_rank,size,kernel_len);
+			int* _image= portion_image(pading_image,row_extend,col_extend,&row_created,div_ratio,_rank,size,kernel_len);
 
 			 if (_rank == Master)
 			 {
@@ -226,36 +247,36 @@ int main(int args, char** argv)
 				 continue;
 			 }
 
-			 cout << "rank_send:   " << _rank << "  data:   " << _image[0] << endl;
 			 	MPI_Send(&row_created, 1, MPI_INT, _rank, Master, mcw);
-	 			MPI_Send(&_image[0], row_created * col_extend, MPI_INT, _rank,Master + 1, mcw);
+	 			//MPI_Send(&_image[0], row_created * col_extend, MPI_INT, _rank,Master + 1, mcw);
 
-				
+				MPI_Isend(&_image[0], row_created * col_extend, MPI_INT, _rank, (Master + 1), mcw, &request);
 		}*/
+#pragma endregion
+
 	}
 
 	// global variable
 	MPI_Bcast(&col_extend, 1, MPI_INT, Master, mcw);
 
+#pragma region parallel code
+
 	// parallel code start
 
-	if (rank != Master)
+	if (rank != Master) // recv the data form the master
 	{
 		MPI_Status stats;
 		MPI_Recv(&sub_img_r, 1, MPI_INT, Master, Master, mcw, &stats);
 
 		sub_image = new int[sub_img_r * col_extend];
-		MPI_Recv(&sub_image[0], sub_img_r * col_extend, MPI_INT, 0,(Master + 1), mcw, &stats);
-
-		//cout << "rank_recv:   " << rank << "  data:   " << sub_image[(sub_img_r * col_extend) - 1] << endl;
-
+		MPI_Recv(&sub_image[0], sub_img_r * col_extend, MPI_INT, Master,(Master + 1), mcw, &stats); // wait for send to complete
 
 	}
 	
 
 	// start the maltiplication of the matrices
-	matrix_mul = Matrix_mul(sub_image, sub_img_r, col_extend, matrix, kernel_len, sum_kernel);
-
+	matrix_mul = Matrix_mul(sub_image, sub_img_r, col_extend, kernel, kernel_len, sum_kernel);
+	
 	free(sub_image);
 
 	// send back the results to the master
@@ -268,8 +289,11 @@ int main(int args, char** argv)
 		free(matrix_mul);
 	}
 
-
 	// parallel code End
+#pragma endregion
+
+
+#pragma region recv the calculated data and the data of the master into one array(filtered_img)
 
 	// recv back the result 
 	if (rank == Master)
@@ -303,33 +327,47 @@ int main(int args, char** argv)
 
 			MPI_Recv(&row_rank, 1, MPI_INT, _rank, Master, mcw, &status);
 
-			//cout << "  Rank:  " << _rank << "  Receve row_rank" << row_rank << endl;
-
 			MPI_Recv(&filtered_img[(start_row_index * col)], row_rank * col, MPI_INT, _rank, (Master + 1), mcw, &status);
 
 			start_row_index += row_rank;
 
 		}
-			
-			stop_s = clock();
-		// create the image
+	}
+#pragma endregion
 
-			cout << "the image will be save as ResOutput(n) ::" << "Enter number replace (n)" << "\t";
+
+#pragma region create the filtered image
+	if(rank == Master){
+			stop_s = clock(); // stop the time of aplly the kerel
+		
+			// create the image
+
+			/*cout << "the image will be save as OutputRes(n) ::" << "Enter number replace (n) :" << "\t";
 			int n = 0;
 			cin >> n;
-		createImage(filtered_img, row, col, n);
+		createImage(filtered_img, row, col, n);*/
+			createImage(filtered_img, row, col, 0);
 
-			print(filtered_img,0,0,3,10,col);
+		stop_s = clock(); // stop the time of the program
 
-		TotalTime += (stop_s - start_s) / double(CLOCKS_PER_SEC) * 1000;
-		cout << "time: " << TotalTime << endl;
 
+		time_of_aplly_kerel = (stop_s - start_k) / float(CLOCKS_PER_SEC) * 1000;
+		cout << "time of calculation: " << time_of_aplly_kerel << endl;
+
+
+		TotalTime = (stop_s - start_s) / float(CLOCKS_PER_SEC) * 1000;
+		cout << "time of the program: " << TotalTime << endl;
 
 		delete[]filtered_img;
 	}
+#pragma endregion
 
 	MPI_Finalize();
 }
+	
+
+
+		// Function Declaretion
 void print(int* img,int start_i,int start_j, int end_row, int end_col,int size_col)
 {
 	if (img == NULL) return;
@@ -467,7 +505,8 @@ int* portion_image(int* img, int row, int col, int* n_row_created, int div_ratio
 	return sub_image;
 }
 
-int* Matrix_mul(int* img, int img_row, int img_col, int* kernel, int kernel_len, int kernel_sum)
+
+int* Matrix_mul(int* img, int img_row, int img_col, int* kernel, int kernel_len,int kernel_sum) // kernel is integer
 {
 	int* _img = new int[(img_row - (kernel_len - 1)) * (img_col - (kernel_len - 1))];
 	int ptr_prev_r, ptr_prev_c;
@@ -505,3 +544,43 @@ int* Matrix_mul(int* img, int img_row, int img_col, int* kernel, int kernel_len,
 	}
 	return _img;
 }
+
+//int* Matrix_mul(int* img, int img_row, int img_col, float* kernel, int kernel_len,float kernel_sum)  // kernel is float
+//{
+//	int* _img = new int[(img_row - (kernel_len - 1)) * (img_col - (kernel_len - 1))];
+//	int ptr_prev_r, ptr_prev_c;
+//	float sum = 0;
+//	int	sum_median = 0;
+//	int padded_row_per_side = ((kernel_len - 1) / 2);
+//
+//	// loop on the main image start from the actual data discarding the padding rows & cols
+//	for (int i = padded_row_per_side; i < img_row - 1; i++)
+//	{
+//		for (int j = padded_row_per_side; j < img_col - 1; j++)
+//		{
+//			// get the offset to calculate
+//			ptr_prev_r = i - (padded_row_per_side); //start from (center index - kernel row) of the img padding 
+//			ptr_prev_c = j - (padded_row_per_side); //start from (center index - kernel col) of the img padding
+//
+//			// loop to size of the kernal (apply the kernal from the center)
+//			for (int i_k = 0; i_k < kernel_len; i_k++)
+//			{
+//				for (int j_k = 0; j_k < kernel_len; j_k++)
+//				{
+//					//cout << "  img :" << img[((ptr_prev_r + i_k) * img_col) + ptr_prev_c + j_k];
+//					sum += (float)(img[((ptr_prev_r + i_k) * img_col) + ptr_prev_c + j_k] )* (kernel[(i_k * kernel_len) + j_k]);
+//				}
+//				//cout << endl;
+//			}
+//
+//			float t = sum / kernel_sum;
+//			sum_median = ((fmod(t, 1) < 0.5) ? (int)t : (int)t + 1);  // get the median of the multiplication result (result / kernel sum);
+//			_img[((i - (padded_row_per_side)) * (img_col - (kernel_len - 1))) + (j - (padded_row_per_side))] = sum_median;  // fill the result in the temp result array
+//
+//
+//			sum = 0; // clear the prev sum & median
+//			sum_median = 0;
+//		}
+//	}
+//	return _img;
+//}
